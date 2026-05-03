@@ -237,6 +237,7 @@ def delete_old_records(table: Table, cutoff_minutes: int = 1440) -> None:
 
 
 def process_raw_batch(batch_timeslots : dict[tuple, dict[str, list[dict]]], raw_table : Table, ema_table : Table, alpha : float = 0.3):
+    print("Retrieving previous EMA values")
     ema_existing = query_table(ema_table)
     ema_existing_indexed = {
         (
@@ -280,28 +281,35 @@ def process_raw_batch(batch_timeslots : dict[tuple, dict[str, list[dict]]], raw_
                 new_ema_values
             )
             features.append(feature)
-            
+    
+    print("Uploading new EMA values...")
     upsert_ema_features(ema_table, features, ema_id_to_objectid)
     
+    print("Marking raw values as processed...")
     processed_record_ids = [
         r["OBJECTID"]
         for cameras in batch_timeslots.values()
         for records in cameras.values()
         for r in records
     ]
-    mark_processed(
-        raw_table,
-        timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
-        record_ids=processed_record_ids)
     
+    chunk_size = math.ceil(len(processed_record_ids) / 3)
+    for i in range(0, len(processed_record_ids), chunk_size):
+        mark_processed(
+            raw_table,
+            timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
+            record_ids=processed_record_ids[i:i+chunk_size],
+        )    
     
 def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3) -> None:
     """Main orchestrator. Fetch, group, aggregate, and update EMA.
     
     batch_size must be greater than the maximum record count in a timeslot.
     """
-    
+    iteration = 0
     while True:
+        iteration += 1
+        print(f"\nBatch {iteration}: querying up to {batch_size} unprocessed rows...")
         rows = query_table(
             raw_table,
             where="timestamp_procesado IS NULL",
@@ -309,12 +317,15 @@ def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3)
             n=batch_size,
             order_by="timestamp_registro ASC",
         )
-
+        print(f"{len(rows)} rows fetched")
+        
         if not rows:
+            print("Nothing left to process.")
             break
         
         grouped = group_by_timeslot_camera(rows)
         complete_timeslots = get_complete_timeslots(grouped)
+        print(f"{len(grouped)} timeslots in batch, {len(complete_timeslots)} complete")
         
         # all rows are in the current incomplete timeslot
         if not complete_timeslots:
@@ -322,8 +333,12 @@ def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3)
                 print(f"WARNING: batch size ({batch_size}) may be smaller than a single timeslot. Consider increasing it.")
             break
         
-        process_raw_batch(complete_timeslots, raw_table, ema_table, alpha)    
+        process_raw_batch(complete_timeslots, raw_table, ema_table, alpha)
+        print(f"Finished batch {iteration}")
+        print("Deleting old raw records...")
+        delete_old_records(raw_table, cutoff_minutes=RECORD_RETENTION_MINUTES)
     
+    print("Deleting old raw records...")
     delete_old_records(raw_table, cutoff_minutes=RECORD_RETENTION_MINUTES)
     
     
