@@ -1,16 +1,13 @@
-from ultralytics import YOLO
-from ultralytics.engine.results import Results
 import os
 import math
-from tqdm import tqdm
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from arcgis.gis import GIS
-from arcgis.features import GeoAccessor, FeatureSet, Feature, FeatureCollection, FeatureLayer, FeatureLayerCollection, Table
+from arcgis.features import Feature, FeatureLayer, Table
 from typing import Any
 from dotenv import load_dotenv
 
-from utils import print_result, get_tables, query_table
+from utils import print_result, get_layers, get_tables, query_layer, query_table
 
 
 AFORO_ITEM_ID = '3f0ffdcab0a146988db816ce8426cd38'
@@ -174,7 +171,7 @@ def upsert_ema_features(table : Table, features: list[Feature], id_to_objectid: 
         result = table.edit_features(adds=to_add)
         print_result(result, msg="EMAs added for new timeslots", insert=True)
 
-def mark_processed(table : Table, timestamp : int, record_ids: list[int]) -> None:
+def mark_processed(layer : FeatureLayer, timestamp : int, record_ids: list[int]) -> None:
     """Set timestamp_procesado on the given record OBJECTIDs."""
     processed_updates = [
         Feature(attributes={
@@ -183,15 +180,15 @@ def mark_processed(table : Table, timestamp : int, record_ids: list[int]) -> Non
         })
         for objectid in record_ids
     ]
-    table.edit_features(updates=processed_updates)
+    layer.edit_features(updates=processed_updates)
 
-def delete_old_records(table: Table, cutoff_minutes: int = 1440) -> None:
+def delete_old_records(layer: FeatureLayer, cutoff_minutes: int = 1440) -> None:
     """Delete records older than cutoff_minutes that have already been processed."""
     cutoff_dt = datetime.now(timezone.utc) - timedelta(minutes=cutoff_minutes)
     cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    rows = query_table(
-        table,
+    rows = query_layer(
+        layer,
         where=f"timestamp_registro < TIMESTAMP '{cutoff_str}' AND timestamp_procesado IS NOT NULL",
         fields="OBJECTID"
     )
@@ -201,11 +198,11 @@ def delete_old_records(table: Table, cutoff_minutes: int = 1440) -> None:
         return
 
     object_ids = [r["OBJECTID"] for r in rows]
-    result = table.edit_features(deletes=object_ids)
+    _ = layer.edit_features(deletes=object_ids)
     print(f"Deleted {len(object_ids)} old records.")
 
 
-def process_raw_batch(batch_timeslots : dict[tuple, dict[str, list[dict]]], raw_table : Table, ema_table : Table, alpha : float = 0.3):
+def process_raw_batch(batch_timeslots : dict[tuple, dict[str, list[dict]]], raw_layer : FeatureLayer, ema_table : Table, alpha : float = 0.3):
     print("Retrieving previous EMA values")
     ema_existing = query_table(ema_table)
     ema_existing_indexed = {
@@ -265,12 +262,12 @@ def process_raw_batch(batch_timeslots : dict[tuple, dict[str, list[dict]]], raw_
     chunk_size = math.ceil(len(processed_record_ids) / 3)
     for i in range(0, len(processed_record_ids), chunk_size):
         mark_processed(
-            raw_table,
+            raw_layer,
             timestamp=int(datetime.now(timezone.utc).timestamp() * 1000),
             record_ids=processed_record_ids[i:i+chunk_size],
         )    
     
-def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3) -> None:
+def process_raw_data(raw_layer: FeatureLayer, ema_table: Table, batch_size: int = 15000, alpha: float = 0.3) -> None:
     """Main orchestrator. Fetch, group, aggregate, and update EMA.
     
     batch_size must be greater than the maximum record count in a timeslot.
@@ -279,8 +276,8 @@ def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3)
     while True:
         iteration += 1
         print(f"\nBatch {iteration}: querying up to {batch_size} unprocessed rows...")
-        rows = query_table(
-            raw_table,
+        rows = query_layer(
+            raw_layer,
             where="timestamp_procesado IS NULL",
             fields="*",
             n=batch_size,
@@ -302,13 +299,13 @@ def process_raw_data(raw_table, ema_table, batch_size=15000, alpha: float = 0.3)
                 print(f"WARNING: batch size ({batch_size}) may be smaller than a single timeslot. Consider increasing it.")
             break
         
-        process_raw_batch(complete_timeslots, raw_table, ema_table, alpha)
+        process_raw_batch(complete_timeslots, raw_layer, ema_table, alpha)
         print(f"Finished batch {iteration}")
         print("Deleting old raw records...")
-        delete_old_records(raw_table, cutoff_minutes=RECORD_RETENTION_MINUTES)
+        delete_old_records(raw_layer, cutoff_minutes=RECORD_RETENTION_MINUTES)
     
     print("Deleting old raw records...")
-    delete_old_records(raw_table, cutoff_minutes=RECORD_RETENTION_MINUTES)
+    delete_old_records(raw_layer, cutoff_minutes=RECORD_RETENTION_MINUTES)
     
     
 if __name__ == "__main__":
@@ -318,10 +315,9 @@ if __name__ == "__main__":
               os.environ["ARCGIS_USERNAME"],
               os.environ["ARCGIS_PASSWORD"])
 
-    tables = get_tables(gis, AFORO_ITEM_ID)
-    raw_table = tables[0]
-    ema_table = tables[1]
+    raw_layer = get_layers(gis, AFORO_ITEM_ID)[1]
+    ema_table = get_tables(gis, AFORO_ITEM_ID)[1]
 
     print("Starting processing...")
-    process_raw_data(raw_table, ema_table, batch_size=15000, alpha=ALPHA)
+    process_raw_data(raw_layer, ema_table, batch_size=15000, alpha=ALPHA)
     print("Done.")
