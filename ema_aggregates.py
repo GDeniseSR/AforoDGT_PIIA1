@@ -17,12 +17,12 @@ RECORD_RETENTION_MINUTES = 24 * 60
 SAMPLE_INTERVAL_MINUTES = 6.0
 ALPHA = 0.25
 TIMESLOTS = [
-    {"label" : "madrugada",          "start" : 0,      "end" : 7    },
-    {"label" : "hora_punta_mañana",  "start" : 7,      "end" : 10   },
-    {"label" : "media_mañana",       "start" : 10,     "end" : 13.5 },
-    {"label" : "hora_comida",        "start" : 13.5,   "end" : 16   },
-    {"label" : "tarde",              "start" : 16,     "end" : 20.5 },
-    {"label" : "noche",              "start" : 20.5,   "end" : 24   },
+    {"label" : "A_madrugada",          "start" : 0,      "end" : 7    },
+    {"label" : "B_hora_punta_mañana",  "start" : 7,      "end" : 10   },
+    {"label" : "C_media_mañana",       "start" : 10,     "end" : 13.5 },
+    {"label" : "D_hora_comida",        "start" : 13.5,   "end" : 16   },
+    {"label" : "E_tarde",              "start" : 16,     "end" : 20.5 },
+    {"label" : "F_noche",              "start" : 20.5,   "end" : 24   },
 ]
 TIMESLOT_ORDER = {slot["label"]: i for i, slot in enumerate(TIMESLOTS)}
 TIMESLOT_N_CAP = {

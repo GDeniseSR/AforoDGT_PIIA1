@@ -88,7 +88,7 @@ def get_last_cameras_update(cameras: list[dict]) -> dict[str, datetime]:
 
 def run_inference(model : YOLO, batch_urls: list[str], classes: list[int]) -> list[Results]:
     """Run YOLO on URLs with class filter."""
-    return model(batch_urls, conf=0.2, classes=classes, verbose=False)
+    return model(batch_urls, conf=0.15, imgsz=800, classes=classes, verbose=False)
 
 def fetch_recent_bboxes(bbox_table: Table, camera_ids: list[str], window_size: int, max_age_minutes: int) -> dict[str, list[list[dict]]]:
     """Fetch the last window_size-1 bbox records per camera. Returns {camera_id: [[bboxes_frame_0], [bboxes_frame_1], ...]}"""
