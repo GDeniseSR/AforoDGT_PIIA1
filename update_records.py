@@ -95,17 +95,19 @@ def fetch_recent_bboxes(bbox_table: Table, camera_ids: list[str], window_size: i
     if not camera_ids:
         return {}
     
+    history: dict[str, list[list[dict]]] = {cid: [] for cid in camera_ids}
+
     cutoff_ms = int((datetime.now(tz=timezone.utc) - timedelta(minutes=max_age_minutes)).timestamp() * 1000)
     ids_expr = ",".join(f"'{cid}'" for cid in camera_ids)
-    where_expr = f"id_camara IN ({ids_expr}) AND timestamp_registro >= {cutoff_ms}"
+    where_expr = f"id_camara IN ({ids_expr})"
 
     rows = query_table(bbox_table, where=where_expr, fields="id_camara,bboxes,timestamp_registro", order_by="id_camara,timestamp_registro DESC")
     
-    history: dict[str, list[list[dict]]] = {cid: [] for cid in camera_ids}
     for row in rows:
         cam_id = row["id_camara"]
         raw    = row["bboxes"]
-        if raw and len(history[cam_id]) < window_size - 1:
+        ts     = row["timestamp_registro"] or 0
+        if raw and ts >= cutoff_ms and len(history[cam_id]) < window_size - 1:
             history[cam_id].append(json.loads(raw))
 
     return history
@@ -139,7 +141,8 @@ def is_parked(box_xyxy: list[float], cls: int, frame_history: list[list[dict]], 
 
 def filter_parked_from_result(result: Results, camera_history: list[list[dict]], required_detections: int, iou_threshold: float, classes_to_filter: list[int]) -> Results:
     """Remove static detections of filtered classes from a single Results object. Modifies result in place."""
-    keep_mask = torch.ones(len(result.boxes), dtype=torch.bool)
+    device = result.boxes.xyxy.device
+    keep_mask = torch.ones(len(result.boxes), dtype=torch.bool, device=device)
 
     for i, (xyxy, cls) in enumerate(zip(result.boxes.xyxy, result.boxes.cls)):
         if is_parked(xyxy.tolist(), int(cls), camera_history, required_detections, iou_threshold, classes_to_filter):
@@ -336,6 +339,11 @@ def process_batch(
     logging.debug("Filtering parked vehicles...")
     moving_results, parked_results = filter_parked_vehicles(results, cameras_batch, bbox_table, filter_required_detections, filter_window_size, filter_max_age_minutes, filter_iou_threshold, classes_to_filter)
 
+    total_before  = sum(len(r.boxes) for r in results)
+    total_after   = sum(len(r.boxes) for r in moving_results)
+    total_parked  = sum(len(r.boxes) for r in parked_results if r is not None)
+    logging.debug(f"Parked filter: {total_before} detections -> {total_after} moving, {total_parked} parked ({total_before - total_after} removed)")
+
     logging.debug("Inserting raw bbox records...")
     insert_bbox_records(bbox_table, cameras_batch, results)
     del results
@@ -490,8 +498,10 @@ def main():
     id_to_objectid = {c["id"]: c["OBJECTID"] for c in current_cameras}
 
     logging.debug("Initialize model")
-    # We process all images from the dgt and add the stats to the dictionary
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = YOLO("yolo26l.pt", task="detect")
+    model.to(device)
+
     logging.debug("Start processing.")
     start = timer()
     _ = process_cameras(

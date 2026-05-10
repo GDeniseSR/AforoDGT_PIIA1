@@ -45,7 +45,7 @@ def query_table(table: Table, where: str = "1=1", fields: str = "*", n: int = -1
             out_fields=fields,
             result_offset=offset,
             result_record_count=chunk_size,
-            order_by_fields=order_by,
+            order_by_fields=order_by
         )
         results.extend(chunk.features)
         offset += len(chunk.features)
