@@ -2,20 +2,15 @@ from ultralytics import YOLO
 from ultralytics.engine.results import Results
 import os
 import math
-import tempfile
-import requests
-import pandas as pd
 from tqdm import tqdm
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from arcgis.gis import GIS
 from arcgis.features import GeoAccessor, FeatureSet, Feature, FeatureCollection, FeatureLayer, FeatureLayerCollection, Table
-from arcgis.geometry import Point
-from arcgis import geometry
 from typing import Any
 from dotenv import load_dotenv
 
-from utils import print_result
+from utils import print_result, get_tables, query_table
 
 
 AFORO_ITEM_ID = '3f0ffdcab0a146988db816ce8426cd38'
@@ -37,32 +32,6 @@ TIMESLOT_N_CAP = {
     slot["label"] : math.ceil(max(1, (slot["end"] - slot["start"]) * (60 / SAMPLE_INTERVAL_MINUTES)))
     for slot in TIMESLOTS
 }
-
-
-def get_tables(gis, item_id) -> list[Table]:
-    item = gis.content.get(item_id)
-    flc = FeatureLayerCollection(item.url, gis=gis)
-    return flc.tables
-
-def query_table(table: Table, where: str = "1=1", fields: str = "*", n: int = -1, order_by: str | None = None) -> list[dict[str, Any]]:
-    """Paginate through all records in an ArcGIS table matching the where clause."""
-    offset = 0
-    batch = 1000
-    results = []
-    while n < 0 or len(results) < n:
-        chunk_size = batch if n < 0 else min(batch, n - len(results))
-        chunk = table.query(
-            where=where,
-            out_fields=fields,
-            result_offset=offset,
-            result_record_count=chunk_size,
-            order_by_fields=order_by,
-        )
-        results.extend(chunk.features)
-        offset += len(chunk.features)
-        if len(chunk.features) < chunk_size:
-            break
-    return [f.attributes for f in results]
 
 def get_timeslot(dt: datetime) -> str | None:
     """Return the timeslot label for a given datetime, or None if it falls in a gap.

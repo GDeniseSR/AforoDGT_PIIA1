@@ -1,7 +1,7 @@
 from arcgis.features import FeatureLayerCollection
 from arcgis.gis import GIS
-
-gis = GIS("home")
+from dotenv import load_dotenv
+import os
 
 camera_layer_definition = {
     "name": "aforo_camaras_dgt",
@@ -55,10 +55,30 @@ camera_layer_definition = {
     "capabilities": "Create,Delete,Query,Update,Editing"
 }
 
-raw_table_definition = {
+raw_layer_definition = {
     "name": "detecciones_raw",
-    "type": "Table",
+    "type": "Feature Layer",
+    "geometryType": "esriGeometryPoint",
     "objectIdField": "OBJECTID",
+    "spatialReference": {"wkid": 4326, "latestWkid": 4326},
+    "drawingInfo": {
+        "renderer": {
+            "type": "simple",
+            "symbol": {
+                "type": "esriSMS",
+                "style": "esriSMSCircle",
+                "color": [252, 196, 196, 255],
+                "size": 4,
+                "angle": 0,
+                "xoffset": 0,
+                "yoffset": 0,
+                "outline": {"color": [0, 0, 0, 255], "width": 0.7}
+            }
+        },
+        "scaleSymbols": True,
+        "transparency": 0,
+        "labelingInfo": None
+    },
     "fields": [
         {"name": "OBJECTID",            "type": "esriFieldTypeOID",     "alias": "OBJECTID",            "sqlType": "sqlTypeOther", "nullable": False, "editable": False, "domain": None, "defaultValue": None},
         {"name": "id_camara",           "type": "esriFieldTypeString",  "alias": "camera_id",           "sqlType": "sqlTypeOther", "length": 2048,  "nullable": False, "editable": True, "domain": None, "defaultValue": None},
@@ -100,17 +120,36 @@ ema_table_definition = {
     "capabilities": "Create,Delete,Query,Update,Editing"
 }
 
-item = gis.content.create_service(
-    name="Aforo Cámaras DGT",
-    service_type="featureService",
-)
+bbox_table_definition = {
+    "name": "detecciones_bbox",
+    "type": "Table",
+    "objectIdField": "OBJECTID",
+    "fields": [
+        {"name": "OBJECTID",           "type": "esriFieldTypeOID",    "alias": "OBJECTID",           "sqlType": "sqlTypeOther",                      "nullable": False, "editable": False, "domain": None, "defaultValue": None},
+        {"name": "id_camara",          "type": "esriFieldTypeString", "alias": "camera_id",          "sqlType": "sqlTypeOther", "length": 2048,      "nullable": False, "editable": True,  "domain": None, "defaultValue": None},
+        {"name": "timestamp_registro", "type": "esriFieldTypeDate",   "alias": "timestamp_registro", "sqlType": "sqlTypeOther",                      "nullable": False, "editable": True,  "domain": None, "defaultValue": None},
+        {"name": "bboxes",             "type": "esriFieldTypeString", "alias": "bboxes",             "sqlType": "sqlTypeOther", "length": 2147483647, "nullable": True,  "editable": True,  "domain": None, "defaultValue": None},
+    ],
+    "capabilities": "Create,Delete,Query,Update,Editing"
+}
 
-flc = FeatureLayerCollection(item.url, gis=gis)
-flc.manager.update_definition({
-    "spatialReference": {"wkid": 4326, "latestWkid": 4326}
-})
-flc.manager.add_to_definition({
-    "layers": [camera_layer_definition],
-    "tables": [raw_table_definition, ema_table_definition]
-})
-print(f"Created: {item.id} — {item.url}")
+if __name__ == "__main__":
+    load_dotenv()
+    gis = GIS("https://xuntasix.maps.arcgis.com",
+          os.environ["ARCGIS_USERNAME"],
+          os.environ["ARCGIS_PASSWORD"])
+
+    item = gis.content.create_service(
+        name="Aforo Cámaras DGT",
+        service_type="featureService",
+    )
+
+    flc = FeatureLayerCollection(item.url, gis=gis)
+    flc.manager.update_definition({
+        "spatialReference": {"wkid": 4326, "latestWkid": 4326}
+    })
+    flc.manager.add_to_definition({
+        "layers": [camera_layer_definition, raw_layer_definition],
+        "tables": [ema_table_definition, bbox_table_definition]
+    })
+    print(f"Created: {item.id} — {item.url}")
